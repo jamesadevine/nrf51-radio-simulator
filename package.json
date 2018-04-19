@@ -1,0 +1,21 @@
+{
+  "name": "nrf51-radio-sim",
+  "version": "0.0.1",
+  "description": "A radio simulator written in TypeScript for the NRF51 SOC",
+  "main": "src/App.ts",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "nrf51",
+    "simulator",
+    "typescript",
+    "nordic",
+    "microbit"
+  ],
+  "author": "James Devine <j.devine@lancaster.ac.uk>",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^9.6.5"
+  }
+}
