@@ -82,6 +82,8 @@ const GO_TO_SLEEP_CHANNEL = 1
 const CHECK_TX_CHANNEL = 2
 const STATE_MACHINE_CHANNEL = 3
 
+let channel_arr: string[] = ["WAKE_UP", "GO_TO_SLEEP", "CHECK_TX_CHANNEL","STATE_MACHINE_CHANNEL"];
+
 var radio_status: number = 0;
 var previous_period: number = 0;
 
@@ -110,13 +112,24 @@ class PeridoFrameBuffer
 
 class PeridoTimer
 {
+    channel_count: number;
+    channels:number[];
     count: number;
     cb: (channel_num:number) => void
 
-    constructor()
+    constructor(channel_count: number)
     {
+        this.channel_count = channel_count
         this.cb = null;
         this.count = 0;
+
+        this.channels = [];
+
+        for(let i = 0; i < channel_count; i++)
+        {
+            this.channels.push(null);
+        }
+
         setInterval(this.incrementCount, 1);
     }
 
@@ -125,9 +138,19 @@ class PeridoTimer
         this.cb = cb;
     }
 
-    setCompare(channel: number, sleepPeriod: number)
+    wrapperFunction= (channel_num:number)=>
     {
-        setTimeout(this.cb, sleepPeriod, channel);
+        this.channels[channel_num] = null;
+        this.cb(channel_num);
+    }
+
+    setCompare(channel: number, sleepPeriod: Number)
+    {
+        if(this.channels[channel] != null)
+            clearTimeout(this.channels[channel]);
+
+        let id = setTimeout(this.wrapperFunction, sleepPeriod, channel);
+        this.channels[channel] = id;
     }
 
     captureCounter(number: number)
@@ -538,7 +561,7 @@ function wake_up()
 
 function timer_callback(channel_num: number)
 {
-    console.log("TIMER ", channel_num);
+    console.log(channel_arr[channel_num], " TIMER");
 
     if(channel_num == WAKE_UP_CHANNEL)
         wake_up();
@@ -574,7 +597,7 @@ class PeridoRadio
             return PeridoRadio.instance;
 
         this.radio = r;
-        this.timer = new PeridoTimer();
+        this.timer = new PeridoTimer(4);
         this.timer.setFunction(timer_callback);
 
         this.txQueue = []
