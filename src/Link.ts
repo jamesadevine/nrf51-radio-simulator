@@ -122,7 +122,13 @@ class Link
 
     private handleDisconnect = ()=>
     {
-        console.log("something closed")
+        console.log("resetting connections")
+
+        for(let c of this.connections)
+        {
+            c.destroy()
+        }
+        this.connections = [];
     }
 
     private onError(err: any)
