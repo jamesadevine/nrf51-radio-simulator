@@ -1,5 +1,18 @@
 import {Radio} from "./Radio"
 
+const BREAK_POINT_ENABLE = 0;
+
+function breakpoint(str: string)
+{
+    if (!BREAK_POINT_ENABLE)
+        return;
+
+    console.log("BREAKPOINT ", str, "\r\n", new Error().stack);
+    debug_radio_state();
+
+    while(1);
+}
+
 const LOW_LEVEL_STATE_MASK = 0x0000FFFF      // a mask for removing or retaining low level state
 
 const RADIO_STATUS_RX_EN = 0x00000001      // reception is enabled
@@ -62,7 +75,7 @@ const TX_BACKOFF_TIME = (1000 - TX_BACKOFF_MIN)
 const TX_TIME = 300         // includes tx time for a larger packet
 const TX_ENABLE_TIME = 300         // includes processing time overhead on reception for other nodes...
 const RX_ENABLE_TIME = 200
-const RX_TX_DISABLE_TIME = 35          // 10 us is pretty pointless for a timer callback.
+const RX_TX_DISABLE_TIME = 50          // 10 us is pretty pointless for a timer callback.
 
 const WAKE_UP_CHANNEL = 0
 const GO_TO_SLEEP_CHANNEL = 1
@@ -103,6 +116,7 @@ class PeridoTimer
     constructor()
     {
         this.cb = null;
+        this.count = 0;
         setInterval(this.incrementCount, 1);
     }
 
@@ -123,17 +137,24 @@ class PeridoTimer
         //return this.count;
     }
 
+    sysTime()
+    {
+        return this.count;
+    }
+
     incrementCount = () =>
     {
         this.count++;
     }
 }
 
+var last_time = 0
+
 function debug_radio_state()
 {
     var low_level = []
     var high_level = []
-
+    let sysTime = PeridoRadio.instance.timer.sysTime();
     for (let rs of radio_status_array)
     {
         if(rs.bitmsk & LOW_LEVEL_STATE_MASK && radio_status & rs.bitmsk)
@@ -150,8 +171,11 @@ function debug_radio_state()
     console.log("\r\n");
     console.log("Low-level Radio has this state enabled: \r\n",PeridoRadio.instance.radio.stateMachine.currentState.name);
     console.log("\r\n");
-    console.log("Radio Q Depth: \r\n",PeridoRadio.instance.txQueue.length);
+    console.log("Radio RQ Depth: \r\n",PeridoRadio.instance.rxQueue.length);
+    console.log("Radio TQ Depth: \r\n",PeridoRadio.instance.txQueue.length);
+    console.log("System Time: \r\n", sysTime - last_time)
     console.log("-----------------------");
+    last_time = sysTime;
 }
 
 function radio_state_machine()
@@ -293,6 +317,8 @@ function radio_state_machine()
             if(!(radio_status & RADIO_STATUS_DISCOVERING))
                 PeridoRadio.instance.timer.setCompare(CHECK_TX_CHANNEL, PeridoRadio.instance.timer.captureCounter(CHECK_TX_CHANNEL) + TX_BACKOFF_MIN + microbit_random(TX_BACKOFF_TIME));
 
+            // breakpoint("tx_end");
+
             PeridoRadio.instance.radio.EVENTS_END(0);
         }
     }
@@ -320,12 +346,12 @@ function radio_state_machine()
 
             // only the initial sender of the packet will reach a ttl of 0, other nodes will see the last ttl as one
             // we have a little bit of time before the next radio interrupt from a TX complete.
-            if (PeridoRadio.instance.rxBuf.ttl == 0)
-            {
-                radio_status |= RADIO_STATUS_WAKE_CONFIGURED;
-                previous_period = PeridoRadio.instance.rxBuf.sleep_period_ms;
-                PeridoRadio.instance.timer.setCompare(WAKE_UP_CHANNEL, PeridoRadio.instance.timer.captureCounter(WAKE_UP_CHANNEL) + (previous_period /** 1000*/));
-            }
+            // if (PeridoRadio.instance.rxBuf.ttl == 0)
+            // {
+            //     radio_status |= RADIO_STATUS_WAKE_CONFIGURED;
+            //     previous_period = PeridoRadio.instance.rxBuf.sleep_period_ms;
+            //     PeridoRadio.instance.timer.setCompare(WAKE_UP_CHANNEL, PeridoRadio.instance.timer.captureCounter(WAKE_UP_CHANNEL) + (previous_period /** 1000*/));
+            // }
 
             let tx: PeridoFrameBuffer = PeridoRadio.instance.txQueue[0] || null;
 
@@ -346,14 +372,14 @@ function radio_state_machine()
             radio_status |= RADIO_STATUS_DISABLE | RADIO_STATUS_RX_EN;
 
             // the original sender won't reach a ttl of 1, account for the transmitter configuring timer using an offset of a cycle to TX mode
-            if(PeridoRadio.instance.rxBuf.ttl == 1)
+            if(PeridoRadio.instance.radio.PACKETPTR().ttl == 0)
             {
-                console.log("WAKE CONFIGURED");
+                breakpoint("FWD TX_END");
 
                 radio_status &= ~RADIO_STATUS_FORWARD;
                 radio_status |= RADIO_STATUS_WAKE_CONFIGURED;
                 previous_period = PeridoRadio.instance.rxBuf.sleep_period_ms;
-                PeridoRadio.instance.timer.setCompare(WAKE_UP_CHANNEL, PeridoRadio.instance.timer.captureCounter(WAKE_UP_CHANNEL) + (previous_period /** 1000*/) + TX_ENABLE_TIME + RX_TX_DISABLE_TIME);
+                PeridoRadio.instance.timer.setCompare(WAKE_UP_CHANNEL, PeridoRadio.instance.timer.captureCounter(WAKE_UP_CHANNEL) + (previous_period /** 1000*/));
             }
 
             PeridoRadio.instance.radio.EVENTS_END(0);
@@ -370,10 +396,11 @@ function radio_state_machine()
 
 
         // set the next wake up time accounting for the time it takes for the sender to receive, and flag for storage
-        if (p.ttl == 1)
+        if (p.ttl == 0)
         {
+            breakpoint("STORE ");
             radio_status |= RADIO_STATUS_WAKE_CONFIGURED;
-            PeridoRadio.instance.timer.setCompare(WAKE_UP_CHANNEL, PeridoRadio.instance.timer.captureCounter(WAKE_UP_CHANNEL) + (p.sleep_period_ms/* * 1000*/) + TX_ENABLE_TIME);
+            PeridoRadio.instance.timer.setCompare(WAKE_UP_CHANNEL, PeridoRadio.instance.timer.captureCounter(WAKE_UP_CHANNEL) + (p.sleep_period_ms/* * 1000*/));
             previous_period = p.sleep_period_ms;
         }
 
@@ -473,8 +500,10 @@ function go_to_sleep()
         if (!(radio_status & (RADIO_STATUS_WAKE_CONFIGURED | RADIO_STATUS_DISCOVERING)) && previous_period > 0)
         {
             console.log("prev period set");
-            radio_status |= RADIO_STATUS_WAKE_CONFIGURED | RADIO_STATUS_SLEEPING;
-        PeridoRadio.instance.timer.setCompare(WAKE_UP_CHANNEL, PeridoRadio.instance.timer.captureCounter(WAKE_UP_CHANNEL) + (previous_period /** 1000*/));
+            radio_status &= ~RADIO_STATUS_FORWARD;
+            radio_status |= RADIO_STATUS_WAKE_CONFIGURED | RADIO_STATUS_SLEEPING | RADIO_STATUS_DISABLE;
+            PeridoRadio.instance.timer.setCompare(WAKE_UP_CHANNEL, PeridoRadio.instance.timer.captureCounter(WAKE_UP_CHANNEL) + (previous_period /** 1000*/));
+            radio_state_machine();
             return;
         }
     }
@@ -501,7 +530,7 @@ function wake_up()
     {
         let tx_backoff = TX_BACKOFF_MIN +  microbit_random(TX_BACKOFF_TIME);
         PeridoRadio.instance.timer.setCompare(CHECK_TX_CHANNEL, PeridoRadio.instance.timer.captureCounter(CHECK_TX_CHANNEL) + tx_backoff);
-        PeridoRadio.instance.timer.setCompare(GO_TO_SLEEP_CHANNEL, PeridoRadio.instance.timer.captureCounter(GO_TO_SLEEP_CHANNEL) + (tx_backoff + microbit_random(SLEEP_BACKOFF_TIME)));
+        PeridoRadio.instance.timer.setCompare(GO_TO_SLEEP_CHANNEL, PeridoRadio.instance.timer.captureCounter(GO_TO_SLEEP_CHANNEL) + (tx_backoff + SLEEP_BACKOFF_TIME));
     }
 
     radio_state_machine();

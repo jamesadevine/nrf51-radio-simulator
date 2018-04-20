@@ -300,11 +300,12 @@ class Radio
         if (!valid)
             return;
 
-        let id = setTimeout(this.deferred_event, 0, event);
-        //this.timeouts.push(id);
+        let t:Number = 0;
+        let id = setTimeout(this.deferred_event, t, event);
+        this.timeouts.push(id);
     }
 
-    deferred_event = (event: string) =>
+    deferred_event = (event: string,test:number) =>
     {
         this.interruptManager.interrupt(event);
     }
@@ -314,9 +315,9 @@ class Radio
         if (cb)
             cb();
 
-        // console.log('old state: ',this.stateMachine.currentState.name);
+        console.log('old state: ',this.stateMachine.currentState.name);
         this.stateMachine.commenceAction(action);
-        // console.log('new state: ',this.stateMachine.currentState.name,"\r\n");
+        console.log('new state: ',this.stateMachine.currentState.name,"\r\n");
 
         if (this.stateMachine.currentState.triggerAction.action != "NONE")
             // schedule callback
@@ -425,10 +426,12 @@ class Radio
 
             if (this.stateMachine.currentState.name.indexOf("TX") > -1)
             {
+                console.log("CLEARING TX")
                 this.update_state(txDisable)
             }
             else if (this.stateMachine.currentState.name.indexOf("RX") > -1)
             {
+                console.log("CLEARING RX")
                 this.update_state(rxDisable)
             }
         }
@@ -439,16 +442,28 @@ class Radio
     {
         if (value > 0)
         {
-            if (this.stateMachine.currentState.name == "TXIDLE")
+            if (this.stateMachine.currentState.name.indexOf("TX") > -1)
             {
+                if (this.stateMachine.currentState.name != "TXIDLE")
+                {
+                    throw new Error("Invalid tasks start state, current state: " + this.stateMachine.currentState.name);
+                }
                 this.update_state(txStart)
 
                 this.schedule_state_update(txEnd,()=>{
                     this.lc.send(this.packet);
                 })
             }
-            else
+            else if(this.stateMachine.currentState.name.indexOf("RX") > -1)
+            {
+                if (this.stateMachine.currentState.name != "RXIDLE")
+                {
+                    throw new Error("Invalid tasks start state, current state: " + this.stateMachine.currentState.name);
+                }
+
                 this.update_state(rxStart)
+            }
+
         }
     }
 }
