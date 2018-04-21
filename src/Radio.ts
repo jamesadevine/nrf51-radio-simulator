@@ -1,4 +1,4 @@
-import {Link, LinkClient, LinkPacket, LINK_PORT} from "./Link";
+import {Link, LinkClient, LinkPacket, PacketType, LINK_PORT} from "./Link";
 import {PeridoRadio} from "./PeridoRadio";
 
 
@@ -61,7 +61,7 @@ let txReady: Action = new Action("READY", "TXIDLE", 135);
 let txStart: Action = new Action("START", "TX");
 let txEnd: Action = new Action("END", "TXIDLE", 166);
 let txStop: Action = new Action("STOP", "TXIDLE");
-let txAddress: Action = new Action("ADDRESS", "TX");
+let txAddress: Action = new Action("ADDRESS", "TX", 40);
 let txPayload: Action = new Action("PAYLOAD", "TX");
 
 let disableAction: Action = new Action("DISABLE", "DISABLED", 30);
@@ -336,24 +336,26 @@ class Radio
         return this.stateMachine.currentState;
     }
 
-    recv_from_pipe = (packet: any) =>
+    recv_from_pipe = (packet: any, type: PacketType) =>
     {
-        if (this.stateMachine.currentState.name == "RX")
+        if(type == PacketType.StandardPacket)
         {
-            PeridoRadio.instance.rxBuf = packet;
-            // this.packet = packet;
-            this.update_state(rxEnd);
+            if (this.stateMachine.currentState.name == "RX")
+            {
+                PeridoRadio.instance.rxBuf = packet;
+                // this.packet = packet;
+                this.update_state(rxEnd);
+            }
+            else
+            {
+                console.log("NOT IN RX");
+            }
         }
-        else
-        {
-            console.log("NOT IN RX");
-        }
-    }
 
-    tx_to_pipe = (data: any) =>
-    {
-        if (this.stateMachine.currentState.name == "RX")
-            this.update_state(rxEnd);
+        if(type == PacketType.LinkPacket)
+        {
+            this.schedule_interrupt(packet.action);
+        }
     }
 
     CRCSTATUS()
@@ -449,6 +451,10 @@ class Radio
                     throw new Error("Invalid tasks start state, current state: " + this.stateMachine.currentState.name);
                 }
                 this.update_state(txStart)
+
+                this.schedule_state_update(txAddress,()=>{
+                    this.lc.send({"action":"ADDRESS"});
+                })
 
                 this.schedule_state_update(txEnd,()=>{
                     this.lc.send(this.packet);

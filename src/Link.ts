@@ -5,7 +5,8 @@ const LINK_PORT = 8127;
 enum PacketType
 {
     CommandPacket,
-    StandardPacket
+    StandardPacket,
+    LinkPacket
 }
 
 class LinkPacket
@@ -39,7 +40,7 @@ class LinkClient
     port: number;
     s:net.Socket;
     clientId: number;
-    cb:(packet: any) =>void
+    cb:(packet: any, type: PacketType) =>void
 
     constructor(port:number)
     {
@@ -72,10 +73,10 @@ class LinkClient
         }
 
         if (this.cb != null)
-            this.cb(JSON.parse(packet.payload));
+            this.cb(JSON.parse(packet.payload),packet.type);
     }
 
-    setRxCallback(cb:(packet: any) => void)
+    setRxCallback(cb:(packet: any, type: PacketType) => void)
     {
         this.cb = cb;
     }
@@ -143,4 +144,4 @@ class Link
 
 }
 
-export {Link, LinkClient, LinkPacket, LINK_PORT};
+export {Link, LinkClient, LinkPacket, PacketType, LINK_PORT};
