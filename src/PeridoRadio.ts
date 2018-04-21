@@ -251,7 +251,7 @@ function radio_state_machine()
         if(PeridoRadio.instance.radio.EVENTS_ADDRESS())
         {
             console.log("RX ADDR")
-            PeridoRadio.instance.radio.EVENTS_ADDRESS();
+            PeridoRadio.instance.radio.EVENTS_ADDRESS(0);
             radio_status |= RADIO_STATUS_RECEIVING;
             return;
         }
@@ -613,6 +613,7 @@ class PeridoRadio
     enable()
     {
         this.radio.enable_interrupt("END", radio_IRQ);
+        this.radio.enable_interrupt("ADDRESS", radio_IRQ);
         radio_status = RADIO_STATUS_DISABLED | RADIO_STATUS_DISCOVERING;
         this.timer.setCompare(WAKE_UP_CHANNEL,600);
     }

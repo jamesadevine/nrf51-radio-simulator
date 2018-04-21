@@ -54,9 +54,9 @@ class LinkClient
         this.cb = null;
     }
 
-    send(data:any)
+    send(data:any, type: PacketType = PacketType.StandardPacket)
     {
-        this.s.write(JSON.stringify(new LinkPacket(this.clientId,data,PacketType.StandardPacket)));
+        this.s.write(JSON.stringify(new LinkPacket(this.clientId, data, type)));
     }
 
     handleData = (data: any) =>

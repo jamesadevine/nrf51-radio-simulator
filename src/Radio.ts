@@ -453,7 +453,7 @@ class Radio
                 this.update_state(txStart)
 
                 this.schedule_state_update(txAddress,()=>{
-                    this.lc.send({"action":"ADDRESS"});
+                    this.lc.send({"action":"ADDRESS"}, PacketType.LinkPacket);
                 })
 
                 this.schedule_state_update(txEnd,()=>{
