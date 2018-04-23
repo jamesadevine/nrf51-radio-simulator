@@ -15,6 +15,7 @@ class LinkPacket
     timestamp: number;
     type: PacketType;
     payload: string;
+    crc: boolean;
 
     constructor(clientId:number, payload:string, type:PacketType);
     constructor(clientId:number, payload:Object, type:PacketType);
@@ -31,7 +32,9 @@ class LinkPacket
         else
             this.payload = payload;
 
-        this.timestamp
+        this.timestamp;
+
+        this.crc = true;
     }
 }
 
@@ -88,6 +91,8 @@ class Link
     port: number;
     connId:number;
     connections: net.Socket[]
+    cachedPackets: LinkPacket[];
+    count: number;
 
     constructor(port: number)
     {
@@ -95,6 +100,9 @@ class Link
         this.port = port;
         this.connections = [];
         this.connId = 1;
+        this.cachedPackets = [];
+
+        this.count = 0;
 
         this.s.listen(port);
         this.s.on("data",this.handleData)
@@ -115,13 +123,58 @@ class Link
     private handleData = (data:any) =>
     {
         console.log("Link Server: ", data);
-        for(let c of this.connections)
+        let dp : LinkPacket = data as LinkPacket;
+
+        var exists = false;
+        for (let p of this.cachedPackets)
         {
-            c.write(data);
+            if (p.payload != dp.payload)
+            {
+                exists = true;
+                break;
+            }
         }
+
+        if (!exists)
+        {
+            console.log("DOESN'T EXIST ",this.cachedPackets, this.count);
+            setTimeout(this.forwardPacket, 50, dp, this.count++);
+        }
+
+        this.cachedPackets.push(dp);
     }
 
-    private handleDisconnect = ()=>
+    private forwardPacket = (dp: LinkPacket, count:number) =>
+    {
+        // compute if "crc" valid
+        for (let p of this.cachedPackets)
+        {
+            if (p.payload == dp.payload && dp.timestamp - p.timestamp > 2)
+            {
+                dp.crc = false;
+                break;
+            }
+        }
+
+        console.log("sending ",dp, "count", count);
+
+        for(let c of this.connections)
+        {
+            c.write(dp);
+        }
+
+        // console.log("BEFORE ", this.cachedPackets);
+        for (let i = 0; i < this.cachedPackets.length; i++)
+        {
+            if (this.cachedPackets[i].payload == dp.payload)
+            {
+                this.cachedPackets = this.cachedPackets.splice(i,1);
+            }
+        }
+        // console.log("AFTER ", this.cachedPackets);
+    }
+
+    private handleDisconnect = () =>
     {
         console.log("resetting connections")
 
@@ -129,6 +182,7 @@ class Link
         {
             c.destroy()
         }
+
         this.connections = [];
     }
 

@@ -75,7 +75,7 @@ const TX_BACKOFF_TIME = (1000 - TX_BACKOFF_MIN)
 const TX_TIME = 300         // includes tx time for a larger packet
 const TX_ENABLE_TIME = 300         // includes processing time overhead on reception for other nodes...
 const RX_ENABLE_TIME = 200
-const RX_TX_DISABLE_TIME = 50          // 10 us is pretty pointless for a timer callback.
+const RX_TX_DISABLE_TIME = 60          // 10 us is pretty pointless for a timer callback.
 
 const WAKE_UP_CHANNEL = 0
 const GO_TO_SLEEP_CHANNEL = 1
@@ -457,8 +457,7 @@ function radio_state_machine()
         // Turn off the transceiver.
         PeridoRadio.instance.radio.EVENTS_DISABLED(0);
         PeridoRadio.instance.radio.TASKS_DISABLE(1);
-        radio_status &= ~RADIO_STATUS_DISABLE;
-        radio_status |= RADIO_STATUS_DISABLED;
+        radio_status = (radio_status & (HIGH_LEVEL_STATE_MASK | RADIO_STATUS_RX_EN | RADIO_STATUS_TX_EN)) | RADIO_STATUS_DISABLED;
 
         PeridoRadio.instance.timer.setCompare(STATE_MACHINE_CHANNEL, PeridoRadio.instance.timer.captureCounter(STATE_MACHINE_CHANNEL) + RX_TX_DISABLE_TIME);
         return;
@@ -467,7 +466,7 @@ function radio_state_machine()
 
 function radio_IRQ(event:string)
 {
-    console.log("IRQ");
+    console.log("IRQ: ",event);
     radio_state_machine();
 }
 
@@ -551,7 +550,9 @@ function wake_up()
     }
     else
     {
-        let tx_backoff = TX_BACKOFF_MIN +  microbit_random(TX_BACKOFF_TIME);
+        // as the queue grows, decrease back off time
+        let len = (PeridoRadio.instance.txQueue.length > 0) ? PeridoRadio.instance.txQueue.length : 1;
+        let tx_backoff = (TX_BACKOFF_MIN / len) +  microbit_random(TX_BACKOFF_TIME);
         PeridoRadio.instance.timer.setCompare(CHECK_TX_CHANNEL, PeridoRadio.instance.timer.captureCounter(CHECK_TX_CHANNEL) + tx_backoff);
         PeridoRadio.instance.timer.setCompare(GO_TO_SLEEP_CHANNEL, PeridoRadio.instance.timer.captureCounter(GO_TO_SLEEP_CHANNEL) + (tx_backoff + SLEEP_BACKOFF_TIME));
     }

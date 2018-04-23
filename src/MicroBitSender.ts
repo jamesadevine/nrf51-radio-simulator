@@ -6,8 +6,10 @@ let pr = new PeridoRadio(r, 0x123456, 0x789123);
 let str = "abc123";
 
 pr.enable();
-pr.send("ABC123");
 
-setInterval(()=>{
+function sendPacket()
+{
     pr.send("ABC123");
-}, 20000)
+}
+
+setInterval(sendPacket, Math.random() * 20000);
