@@ -12,4 +12,4 @@ function sendPacket()
     pr.send("ABC123");
 }
 
-setInterval(sendPacket, Math.random() * 20000);
+setInterval(sendPacket, 10000 + (Math.random() * 20000));

@@ -354,7 +354,10 @@ class Radio
 
         if(type == PacketType.LinkPacket)
         {
-            this.schedule_interrupt(packet.action);
+            if(packet.action == "ADDRESS" && (this.stateMachine.currentState.name == "RX"))
+            {
+                this.schedule_interrupt(packet.action);
+            }
         }
     }
 
