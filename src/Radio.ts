@@ -342,6 +342,7 @@ class Radio
         {
             if (this.stateMachine.currentState.name == "RX")
             {
+                console.log("RX PACKET ",packet);
                 PeridoRadio.instance.rxBuf = packet;
                 // this.packet = packet;
                 this.update_state(rxEnd);

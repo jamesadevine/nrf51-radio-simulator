@@ -80,6 +80,10 @@ const TX_ENABLE_TIME = 300         // includes processing time overhead on recep
 const RX_ENABLE_TIME = 200
 const RX_TX_DISABLE_TIME = 60          // 10 us is pretty pointless for a timer callback.
 
+const FORWARD_POLL_TIME = 200;
+const ABSOLUTE_RESPONSE_TIME = 600;
+const PERIDO_DEFAULT_PERIOD = 6000;
+
 const WAKE_UP_CHANNEL = 0
 const GO_TO_SLEEP_CHANNEL = 1
 const CHECK_TX_CHANNEL = 2
@@ -268,7 +272,7 @@ function radio_state_machine()
 
             packet_received_count++;
             sleep_received_count = packet_received_count;
-            PeridoRadio.instance.timer.setCompare(GO_TO_SLEEP_CHANNEL, PeridoRadio.instance.timer.captureCounter(GO_TO_SLEEP_CHANNEL) + SLEEP_BACKOFF_TIME);
+            PeridoRadio.instance.timer.setCompare(GO_TO_SLEEP_CHANNEL, PeridoRadio.instance.timer.captureCounter(GO_TO_SLEEP_CHANNEL) + FORWARD_POLL_TIME + 500);
 
 
             PeridoRadio.instance.radio.EVENTS_END(0);
@@ -276,10 +280,13 @@ function radio_state_machine()
 
             if(PeridoRadio.instance.radio.CRCSTATUS() == 1)
             {
-                let p: PeridoFrameBuffer = PeridoRadio.instance.rxBuf;
+                let p: PeridoFrameBuffer = PeridoRadio.instance.rxBuf || null;
                 console.log(p);
+
                 if (p)
                 {
+                    previous_period = p.sleep_period_ms;
+
                     if(p.ttl > 0)
                     {
                         p.ttl--;
@@ -288,7 +295,9 @@ function radio_state_machine()
                     }
                     else
                     {
-                        // breakpoint("TTL is 0");
+                        // breakpoint("FUUUU");
+                        radio_status &= ~RADIO_STATUS_FORWARD;
+                        PeridoRadio.instance.timer.setCompare(CHECK_TX_CHANNEL, PeridoRadio.instance.timer.captureCounter(CHECK_TX_CHANNEL) + TX_BACKOFF_MIN + microbit_random(TX_BACKOFF_TIME));
                         radio_status |= RADIO_STATUS_STORE;
                     }
                 }
@@ -298,15 +307,7 @@ function radio_state_machine()
                 // add last packet to worry queue
             }
 
-            radio_status &= ~RADIO_STATUS_EXPECT_RESPONSE;
-
-            // we have officially finished discovery, and are aligned with the current schedule. Begin determining the end of transmission.
-            if (radio_status & RADIO_STATUS_DISCOVERING)
-            {
-                console.log("DISCOVER")
-                radio_status &= ~RADIO_STATUS_DISCOVERING;
-                PeridoRadio.instance.timer.setCompare(GO_TO_SLEEP_CHANNEL, PeridoRadio.instance.timer.captureCounter(GO_TO_SLEEP_CHANNEL) + SLEEP_BACKOFF_TIME);
-            }
+            radio_status &= ~(RADIO_STATUS_EXPECT_RESPONSE | RADIO_STATUS_DISCOVERING);
         }
     }
 
@@ -347,10 +348,7 @@ function radio_state_machine()
 
             radio_status |= (RADIO_STATUS_FORWARD | RADIO_STATUS_DISABLE | RADIO_STATUS_RX_EN | RADIO_STATUS_EXPECT_RESPONSE);
 
-            if(!(radio_status & RADIO_STATUS_DISCOVERING))
-                PeridoRadio.instance.timer.setCompare(CHECK_TX_CHANNEL, PeridoRadio.instance.timer.captureCounter(CHECK_TX_CHANNEL) + TX_BACKOFF_MIN + microbit_random(TX_BACKOFF_TIME));
-
-            // breakpoint("tx_end");
+            PeridoRadio.instance.timer.setCompare(GO_TO_SLEEP_CHANNEL, PeridoRadio.instance.timer.captureCounter(GO_TO_SLEEP_CHANNEL) + FORWARD_POLL_TIME);
 
             PeridoRadio.instance.radio.EVENTS_END(0);
         }
@@ -366,6 +364,17 @@ function radio_state_machine()
             return;
         }
 
+        if(radio_status & RADIO_STATUS_TX_END)
+        {
+            console.log("F TX END")
+            radio_status &= ~RADIO_STATUS_TX_END;
+            radio_status |= RADIO_STATUS_DISABLE | RADIO_STATUS_RX_EN;
+
+            PeridoRadio.instance.timer.setCompare(GO_TO_SLEEP_CHANNEL, PeridoRadio.instance.timer.captureCounter(GO_TO_SLEEP_CHANNEL) + FORWARD_POLL_TIME + 500);
+
+            PeridoRadio.instance.radio.EVENTS_END(0);
+        }
+
         if(radio_status & RADIO_STATUS_TX_RDY)
         {
             console.log("F TX RDY")
@@ -377,45 +386,7 @@ function radio_state_machine()
             PeridoRadio.instance.radio.TASKS_START(1);
             PeridoRadio.instance.radio.EVENTS_END(0);
 
-            // only the initial sender of the packet will reach a ttl of 0, other nodes will see the last ttl as one
-            // we have a little bit of time before the next radio interrupt from a TX complete.
-            // if (PeridoRadio.instance.rxBuf.ttl == 0)
-            // {
-            //     radio_status |= RADIO_STATUS_WAKE_CONFIGURED;
-            //     previous_period = PeridoRadio.instance.rxBuf.sleep_period_ms;
-            //     PeridoRadio.instance.timer.setCompare(WAKE_UP_CHANNEL, PeridoRadio.instance.timer.captureCounter(WAKE_UP_CHANNEL) + (previous_period /** 1000*/));
-            // }
-
-            let tx: PeridoFrameBuffer = PeridoRadio.instance.txQueue[0] || null;
-
-            if(tx != null && PeridoRadio.instance.rxBuf.id == tx.id && PeridoRadio.instance.rxBuf.ttl < tx.ttl)
-            {
-                console.log("POOOOOOP")
-                // only pop our tx buffer if something responds
-                PeridoRadio.instance.popTxQueue();
-            }
-
-            return;
-        }
-
-        if(radio_status & RADIO_STATUS_TX_END)
-        {
-            console.log("F TX END")
-            radio_status &= ~RADIO_STATUS_TX_END;
-            radio_status |= RADIO_STATUS_DISABLE | RADIO_STATUS_RX_EN;
-
-            // the original sender won't reach a ttl of 1, account for the transmitter configuring timer using an offset of a cycle to TX mode
-            if(PeridoRadio.instance.radio.PACKETPTR().ttl == 0)
-            {
-                // breakpoint("FWD TX_END");
-
-                radio_status &= ~RADIO_STATUS_FORWARD;
-                radio_status |= RADIO_STATUS_WAKE_CONFIGURED;
-                previous_period = PeridoRadio.instance.rxBuf.sleep_period_ms;
-                PeridoRadio.instance.timer.setCompare(WAKE_UP_CHANNEL, PeridoRadio.instance.timer.captureCounter(WAKE_UP_CHANNEL) + (previous_period /** 1000*/));
-            }
-
-            PeridoRadio.instance.radio.EVENTS_END(0);
+            radio_status |= RADIO_STATUS_STORE;
         }
 
     }
@@ -426,19 +397,22 @@ function radio_state_machine()
         radio_status &= ~RADIO_STATUS_STORE;
 
         let p: PeridoFrameBuffer = PeridoRadio.instance.rxBuf;
-
-
-        // set the next wake up time accounting for the time it takes for the sender to receive, and flag for storage
-        if (p.ttl == 0)
-        {
-            // breakpoint("STORE ");
-            radio_status &= ~RADIO_STATUS_FORWARD;
-            radio_status |= RADIO_STATUS_WAKE_CONFIGURED;
-            PeridoRadio.instance.timer.setCompare(WAKE_UP_CHANNEL, PeridoRadio.instance.timer.captureCounter(WAKE_UP_CHANNEL) + (p.sleep_period_ms/* * 1000*/));
-            previous_period = p.sleep_period_ms;
-        }
+        let tx: PeridoFrameBuffer = PeridoRadio.instance.txQueue[0] || null;
 
         let seen = false;
+
+        if(tx != null && PeridoRadio.instance.rxBuf.id == tx.id && PeridoRadio.instance.rxBuf.ttl < tx.ttl)
+        {
+            // only pop our tx buffer and set our period if something responds
+            previous_period = PeridoRadio.instance.rxBuf.sleep_period_ms;
+            PeridoRadio.instance.popTxQueue();
+
+            seen =true
+
+            last_seen[last_seen_index] = p.id;
+            last_seen_index = (last_seen_index + 1) %  LAST_SEEN_BUFFER_SIZE;
+
+        }
 
         // check if we've seen this ID before...
         for (var i = 0; i < LAST_SEEN_BUFFER_SIZE; i++)
@@ -499,56 +473,31 @@ function tx_callback()
     }
 
     // otherwise randomly back off.
-    if(!(radio_status & RADIO_STATUS_DISCOVERING))
-    {
-        console.log("tx cb BACK_OFF");
-        PeridoRadio.instance.timer.setCompare(CHECK_TX_CHANNEL, PeridoRadio.instance.timer.captureCounter(CHECK_TX_CHANNEL) + TX_BACKOFF_MIN + microbit_random(TX_BACKOFF_TIME));
-    }
+    console.log("tx cb BACK_OFF");
+    debug_radio_state();
+    PeridoRadio.instance.timer.setCompare(CHECK_TX_CHANNEL, PeridoRadio.instance.timer.captureCounter(CHECK_TX_CHANNEL) + microbit_random(TX_BACKOFF_TIME));
 }
 
 function go_to_sleep()
 {
-    // we have reached the end of the period with no response, come back in another PERIOD useconds.
-    if(radio_status & RADIO_STATUS_DISCOVERING)
+    // nothing has changed, and nothing is about to change.
+    if (!(radio_status & (RADIO_STATUS_RECEIVING | RADIO_STATUS_TRANSMIT)) && packet_received_count == sleep_received_count)
     {
-        console.log("SLEEP D");
-        PeridoRadio.instance.timer.setCompare(CHECK_TX_CHANNEL, PeridoRadio.instance.timer.captureCounter(CHECK_TX_CHANNEL) +  DISCOVERY_TX_BACKOFF_TIME + microbit_random(DISCOVERY_TX_BACKOFF_TIME));
-        PeridoRadio.instance.timer.setCompare(GO_TO_SLEEP_CHANNEL, PeridoRadio.instance.timer.captureCounter(GO_TO_SLEEP_CHANNEL) + DISCOVERY_BACKOFF_TIME);
-        return;
-    }
 
-    if (packet_received_count == sleep_received_count && !(radio_status & (RADIO_STATUS_RECEIVING | RADIO_STATUS_TRANSMIT | RADIO_STATUS_EXPECT_RESPONSE)))
-    {
-        console.log("SLEEP RTS");
-        // if not seen a packet since the last time, aren't in a weird mode, and have a next wake up time, then go to sleep
-        if(radio_status & RADIO_STATUS_WAKE_CONFIGURED)
+        if (radio_status & RADIO_STATUS_EXPECT_RESPONSE)
         {
-            console.log("SLEEP wAkE");
-            radio_status = RADIO_STATUS_DISABLE | RADIO_STATUS_SLEEPING;
-            radio_state_machine();
-            return;
+            no_response_count++
+            radio_status &= ~RADIO_STATUS_EXPECT_RESPONSE;
         }
 
-        // if no next wake configured, not in discovery mode, and we have a previous period, then set wakeup for the previous period
-        if (!(radio_status & RADIO_STATUS_WAKE_CONFIGURED) && previous_period > 0)
-        {
-            console.log("prev period set");
-            radio_status &= ~RADIO_STATUS_FORWARD;
-            radio_status |= RADIO_STATUS_WAKE_CONFIGURED | RADIO_STATUS_SLEEPING | RADIO_STATUS_DISABLE;
-            PeridoRadio.instance.timer.setCompare(WAKE_UP_CHANNEL, PeridoRadio.instance.timer.captureCounter(WAKE_UP_CHANNEL) + (previous_period /** 1000*/));
-            radio_state_machine();
-            return;
-        }
-    }
-    else
-    {
-        console.log("SCHEDULE");
-        debug_radio_state();
-        // else, remain in FORWARD mode, and schedule a wake up come back in another SLEEP_BACKOFF_TIME us
         sleep_received_count = packet_received_count;
-        PeridoRadio.instance.timer.setCompare(GO_TO_SLEEP_CHANNEL, PeridoRadio.instance.timer.captureCounter(GO_TO_SLEEP_CHANNEL) + SLEEP_BACKOFF_TIME);
+        radio_status &= ~RADIO_STATUS_FORWARD;
+        radio_status |= RADIO_STATUS_WAKE_CONFIGURED | RADIO_STATUS_SLEEPING | RADIO_STATUS_DISABLE;
+        let period = (previous_period > 0) ? previous_period : PERIDO_DEFAULT_PERIOD;
+        console.log("SETTING PERIOD ",period);
+        PeridoRadio.instance.timer.setCompare(WAKE_UP_CHANNEL, PeridoRadio.instance.timer.captureCounter(WAKE_UP_CHANNEL) + (period /** 1000*/));
+        radio_state_machine();
     }
-
 }
 
 function wake_up()
@@ -556,23 +505,16 @@ function wake_up()
     radio_status &= ~(RADIO_STATUS_SLEEPING | RADIO_STATUS_WAKE_CONFIGURED);
     radio_status |=  RADIO_STATUS_RX_EN;
 
-    if (radio_status & RADIO_STATUS_EXPECT_RESPONSE)
-    {
-        no_response_count++;
-        breakpoint("INCR")
-    }
-
     if (no_response_count > NO_RESPONSE_THRESHOLD)
     {
         radio_status |= RADIO_STATUS_DISCOVERING;
-        breakpoint("NO RESPONSE");
+        no_response_count = 0;
+        // breakpoint("NO RESPONSE");
     }
 
     if (radio_status & RADIO_STATUS_DISCOVERING)
     {
-        // radio_status |= RADIO_STATUS_FORWARD;
         PeridoRadio.instance.timer.setCompare(CHECK_TX_CHANNEL, PeridoRadio.instance.timer.captureCounter(CHECK_TX_CHANNEL) + DISCOVERY_TX_BACKOFF_TIME + microbit_random(DISCOVERY_TX_BACKOFF_TIME));
-        PeridoRadio.instance.timer.setCompare(GO_TO_SLEEP_CHANNEL, PeridoRadio.instance.timer.captureCounter(GO_TO_SLEEP_CHANNEL) + DISCOVERY_BACKOFF_TIME);
     }
     else
     {
@@ -580,7 +522,7 @@ function wake_up()
         let len = (PeridoRadio.instance.txQueue.length > 0) ? PeridoRadio.instance.txQueue.length : 1;
         let tx_backoff = (TX_BACKOFF_MIN / len) +  microbit_random(TX_BACKOFF_TIME);
         PeridoRadio.instance.timer.setCompare(CHECK_TX_CHANNEL, PeridoRadio.instance.timer.captureCounter(CHECK_TX_CHANNEL) + tx_backoff);
-        PeridoRadio.instance.timer.setCompare(GO_TO_SLEEP_CHANNEL, PeridoRadio.instance.timer.captureCounter(GO_TO_SLEEP_CHANNEL) + (tx_backoff + SLEEP_BACKOFF_TIME));
+        PeridoRadio.instance.timer.setCompare(GO_TO_SLEEP_CHANNEL, PeridoRadio.instance.timer.captureCounter(GO_TO_SLEEP_CHANNEL) + ABSOLUTE_RESPONSE_TIME);
     }
 
     radio_state_machine();
@@ -648,7 +590,7 @@ class PeridoRadio
     queueRxBuf()
     {
         this.rxQueue.push(this.rxBuf);
-        this.rxBuf = new PeridoFrameBuffer();
+        // this.rxBuf = new PeridoFrameBuffer();
     }
 
     popTxQueue()
